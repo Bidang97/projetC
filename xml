@@ -1,0 +1,437 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <float.h>
+#include <math.h>
+#include <string.h>
+#include <stdbool.h>
+
+#define length 1000
+
+//Export
+typedef struct xattribute_t xattribute_t;
+typedef struct xelement_t xelement_t;
+typedef union contenu contenu;
+
+
+struct xattribute_t {
+	char *nom;
+	char *valeur;
+	xattribute_t *next;
+};
+
+struct  xelement_t {
+	char *nom ;
+	xattribute_t *liste;
+	xelement_t *pere;  
+	xelement_t *frere;  //next
+    int contenu_type; // 0 = raw, 1 = list
+    union contenu {
+    	char *raw ;
+    	xelement_t *fils;
+    } *contenu;
+};
+
+
+xelement_t *create_xelement (const char *name) {
+	xelement_t *a =  (xelement_t*)malloc(sizeof(xelement_t));
+	a->nom = malloc(sizeof(strlen(name)+1));
+	strcpy (a->nom, name);
+	a->liste = NULL;
+	a->pere = NULL;
+	a->frere = NULL;
+	a->contenu_type = 0;
+	a->contenu = NULL;
+	return a;
+}
+
+xattribute_t *add_xattribute (xelement_t* e, const char *name, char *value) {
+	xattribute_t *n = (xattribute_t*)malloc(sizeof(xattribute_t));
+	n->nom = malloc(sizeof(strlen(name)+1));
+	n->valeur = malloc(sizeof(strlen(value)+1));
+	strcpy (n->nom, name);
+	strcpy (n->valeur, value);
+	n->next = NULL;
+	//them vao duoi
+	xattribute_t *c = e->liste;
+	xattribute_t *p = NULL;
+	while (c != NULL) {
+		p = c;
+		c = c->next;
+	}
+	if (p != NULL) return p->next = n;
+	else return e->liste = n;
+}
+//them s vao nhanh con cua e
+void add_sub_xelement (xelement_t *e, xelement_t *s) {
+	if (s->pere != NULL) return;
+	else {
+		if (e->contenu_type == 0 && e->contenu)
+			return;
+
+		s->pere = e;
+		if (!e->contenu) {
+			e->contenu = (contenu*)malloc(sizeof(contenu));
+			e->contenu->fils = s;
+			e->contenu_type = 1;
+		} else {
+            //them vao duoi
+			xelement_t *c = e->contenu->fils;
+			xelement_t *p = NULL;
+			while (c != NULL) {
+				p = c;
+				c = c->frere;
+			}
+			if (p != NULL) p->frere = s;
+			else e->contenu->fils = s;
+		}
+	}
+}
+
+void add_raw (xelement_t *e, const char *r) {
+	if (e->contenu)
+		free(e->contenu);
+
+	e->contenu = (contenu*)malloc(sizeof(contenu));
+	e->contenu->raw = malloc(length*sizeof(strlen(r)+1));
+	strcpy (e->contenu->raw, r);
+	
+}
+
+void delete_xelement(xelement_t *e) {
+	free (e->contenu->fils);
+	free (e->pere);
+	free (e->frere);
+	free (e->contenu);
+	free (e);
+}
+
+void save_xelement (FILE *fd, xelement_t *e) {
+	if (e == NULL) printf("Error\n");
+	else { 
+		if (e->liste != NULL) {
+			if (e->frere != NULL ) save_xelement (fd, e->frere);
+			xattribute_t *c = e->liste;
+			if (c-> next == NULL) fprintf(fd, "\n<%s %s = \"%s\">",e->nom, c->nom, c->valeur);
+			else {
+				fprintf(fd, "\t <%s %s = \"%s\"",e->nom, c->nom, c->valeur);
+				while (c->next != NULL) {
+					fprintf(fd, "%s = %s /> ",c->next->nom, c->next->valeur);
+					c->next = c->next->next;
+				}
+			}
+			if (!e->contenu) return;
+			if (e->contenu_type == 0)
+				fprintf(fd, " %s ",e->contenu->raw);
+			else {
+				save_xelement(fd, e->contenu->fils);
+			}
+			if (e->pere == NULL) fprintf (fd, "\n\t</%s> ", e->nom);
+
+		}else if (e->liste == NULL ) {
+			if (e->pere == NULL)	fprintf (fd, "\n<%s> ", e->nom);
+			else {
+				
+				fprintf (fd, "\n");
+				while (e->pere != NULL) {										
+					fprintf (fd, "\t\t ");
+					e->pere = e->pere->pere;
+				}
+				fprintf (fd, "\n<%s> ", e->nom);
+			}
+			if (!e->contenu) return;
+			if (e->contenu_type == 0)
+				fprintf(fd, "%s </%s>", e->contenu->raw, e->nom);
+			else
+				save_xelement(fd, e->contenu->fils);
+			if (e->frere != NULL) save_xelement (fd, e->frere);
+			else
+				fprintf (fd, "\n</%s> ", e->nom);
+		}		
+	}
+}
+
+void save_xml (const char *fname, xelement_t *e) {
+	//mo file de viet
+	FILE *fi = NULL;
+	fi = fopen (fname,"w");
+	if (fname == NULL) printf("\nError"); 
+	else {
+		save_xelement (fi, e);
+		printf("\n\n");
+		fclose (fi);
+	}
+}
+
+void print_xelement(xelement_t* e) {
+	save_xelement(stdout, e);
+}
+
+
+
+//Import
+char next_char (FILE *fd) {
+	if (fd == NULL) exit(1);
+	else {
+		char c = fgetc(fd);
+		fseek(fd, 0L, SEEK_SET);
+		do	{
+			if (c == '\'') exit(1);
+			else if (c == '\n') exit(1);
+			else if (c == '\r') exit(1);
+			else if (c == '\t') exit(1);
+			else return c; break;
+		}while (c != EOF) ;
+	}
+}
+
+
+void check_next_char (FILE *fd, char c) {
+	if ( c != next_char(fd)) return;
+}
+
+bool is_next_char (FILE *fd, char c, bool cons) {
+	if (next_char(fd) == c) return true;
+	else cons = false; ungetc (next_char(fd), fd); return false;
+}
+
+//tra lai ten khi gao ki tu <>/=
+char *next_word (FILE *fd) {
+	if (fd == NULL) exit(1);
+	else {
+		int ok = 0;
+	//	int n = 0;
+		int len = 0;
+		char c;
+		long start = ftell(fd);
+		while (!ok) {
+			c = fgetc(fd);
+			switch(c) {
+				case '<':
+				case '>':
+				case '/':
+				case '=':
+				ok = 1;
+				ungetc(c, fd);
+				break;
+				default:
+				len++;
+				break;
+			}
+		//	if (c == EOF) break;
+		}
+		char *s = malloc(len + 1);
+
+		fseek(fd, start, SEEK_SET);
+		fread(s, 1, len, fd);
+		s[len] = '\0';
+		return s;
+	}
+}
+
+void check_next_word (FILE *fd, const char *w) {
+	int c = strcmp(next_word(fd),w);
+	if (c != 0) return;
+}
+
+//gao dau ngoac kep thu 2 thi ngung 
+char *next_string (FILE *fd) {
+	if (fd == NULL) exit(1);
+	else {
+		int ok = 0;
+		int n = 0;
+		int len = 0;
+		char c;
+		long start = ftell(fd);
+		while (!ok) {
+			c = fgetc(fd);
+			switch(c) {
+				case '\'': n++; len++;
+				if(n == 4) ok = 1; 
+				ok = 1;
+				break;
+				default:
+				len++;
+				break;
+			}
+		//	if (c == EOF) break;
+		}
+		char *s = malloc(len + 1);
+
+		fseek(fd, start, SEEK_SET);
+		fread(s, 1, len, fd);
+		s[len] = '\0';
+		return s;
+	}
+}
+
+//tra lai day ky tu den khi gap '<' (ko tinh vao day ky tu) lan 2
+char *next_raw (FILE *fd) {
+	if (fd == NULL) exit(1);
+	else {
+		int ok = 0;
+		int n = 0;
+		int len = 0;
+		char c;
+		long start = ftell(fd);
+		while (!ok) {
+			c = fgetc(fd);
+			switch(c) {
+				case '<': n++; len++;
+				if (n == 2) ok=1; ungetc (c,fd);
+				ok = 1;
+				break;
+				default:
+				len++;
+				break;
+			}
+		//	if (c == EOF) break;
+		}
+		char *s = malloc(len + 1);
+
+		fseek(fd, start, SEEK_SET);
+		fread(s, 1, len, fd);
+		s[len] = '\0';
+		return s;
+	}
+}
+
+xelement_t* load_xelement(FILE* fd, const char* end_tag);
+
+void load_xelement_raw(FILE* fd, xelement_t* e) {
+	char* w = next_raw(fd);
+	check_next_char(fd, '<');
+	check_next_char(fd, '/');
+	check_next_word(fd, e->nom);
+	check_next_char(fd, '>');
+	add_raw(e,w);
+	free(w);
+}
+
+void load_xelement_sub(FILE* fd, xelement_t* e) {
+	xelement_t* f = load_xelement(fd, e->nom);
+	if (f != NULL) {
+		add_sub_xelement(e,f);
+		load_xelement_sub(fd, e);
+	}
+}
+
+void load_xelement_content(FILE* fd, xelement_t* e) {
+	if (is_next_char(fd,'<',false))
+		load_xelement_sub(fd, e);
+	else
+		load_xelement_raw(fd, e);
+}
+
+xelement_t* load_xelement(FILE* fd, const char* end_tag) {
+	xelement_t* e = NULL;
+	char c;
+
+	check_next_char(fd,'<');
+
+	if ((end_tag) && (is_next_char(fd,'/',true))) {
+		check_next_word(fd,end_tag);
+		check_next_char(fd,'>');
+		return NULL;
+	}
+
+	char* name = next_word(fd);
+	if (name == NULL) {
+		fprintf(stderr, "load_xelement: tag name expected\n");
+		exit(EXIT_FAILURE);
+	}
+	e = create_xelement(name);
+	free(name);
+
+	while((name = next_word(fd)) != NULL) {
+		check_next_char(fd,'=');
+		char* value = next_string(fd);
+		add_xattribute(e,name,value);
+	}
+
+	c = next_char(fd);
+
+	if (c == '/') {
+		check_next_char(fd,'>');
+		return e;
+	}
+
+	if (c == '>') {
+		load_xelement_content(fd, e);
+		return e;
+	}
+
+	fprintf(stderr, "load_xelement: end of markup expected ('>' or '/>'), but got %c\n", c);
+	exit(EXIT_FAILURE);
+}
+
+xelement_t* load_xml(const char* fname) {
+	FILE* fd = fopen(fname, "r");
+	xelement_t* e = load_xelement(fd,NULL);
+	fclose(fd);
+	return e;
+}
+
+int main () {
+//  	test();
+	xelement_t *catalog = create_xelement ("catalog");
+	xelement_t *book1 = create_xelement ("book");
+	add_sub_xelement (catalog,book1);
+	add_xattribute (book1,"id","bk102");
+	xelement_t *author1 = create_xelement ("author");
+	add_sub_xelement (book1,author1);
+	add_xattribute (author1,"lastname","Ralls");
+	add_xattribute (author1,"firstname","Kim");
+	xelement_t *titre1 = create_xelement ("titre");
+	add_sub_xelement (book1,titre1);
+	add_raw (titre1,"Midnight Rain");
+	xelement_t *genre1 = create_xelement ("genre");
+	add_sub_xelement (book1,genre1);
+	add_raw (genre1,"Fantasy");
+	xelement_t *price1 = create_xelement ("price");
+	add_sub_xelement (book1,price1);
+	add_raw (price1,"5.95");
+	xelement_t *publish_date1 = create_xelement ("publish_date");
+	add_sub_xelement (book1,publish_date1);
+	add_raw (publish_date1,"2000-12-16");
+	xelement_t *description1 = create_xelement ("description");
+	add_sub_xelement (book1,description1);
+	add_raw (description1,"A former architect battles corporate zombies, an evil qorceress, and her own childhood to become queen of the world.");
+	
+	
+	xelement_t *book = create_xelement ("book");
+	add_sub_xelement (catalog,book);
+	add_xattribute (book,"id","bk101");
+	xelement_t *author = create_xelement ("author");
+	add_sub_xelement (book,author);
+	add_xattribute (author,"lastname","Gambardella");
+	add_xattribute (author,"firstname","Matthew");
+	xelement_t *titre = create_xelement ("titre");
+	add_sub_xelement (book,titre);
+	add_raw (titre,"XML Developer's Guide");
+	xelement_t *genre = create_xelement ("genre");
+	add_sub_xelement (book,genre);
+	add_raw (genre,"Computer");
+	xelement_t *price = create_xelement ("price");
+	add_sub_xelement (book,price);
+	add_raw (price,"44.95");
+	xelement_t *publish_date = create_xelement ("publish_date");
+	add_sub_xelement (book,publish_date);
+	add_raw (publish_date,"2000-10-01");
+	xelement_t *description = create_xelement ("description");
+	add_sub_xelement (book,description);
+	add_raw (description,"An in-depth look at creating applications with XML.");
+	
+
+
+	print_xelement(catalog);
+	save_xml ("xml.txt",catalog);
+
+
+	//load_xml ("xml.txt");
+	
+	return 0;
+}
+
+
+
+
